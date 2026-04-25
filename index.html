@@ -26,19 +26,18 @@
         let mesAtual = meses[new Date().getMonth()];
         let categoriaAtual = "fixas";
         let dadosApp = {};
+        let idEditando = null; // Controla se estamos editando um item existente
 
         // --- SEGURANÇA (Senha: 769117) ---
         window.verificarSenha = () => {
             const input = document.getElementById("senhaInput").value;
-            const erro = document.getElementById("erroSenha");
             if (btoa(input + "caixa_secreto") === "NzY5MTE3Y2FpeGFfc2VjcmV0bw==") {
                 document.getElementById("loginScreen").style.display = "none";
                 document.getElementById("mainContent").style.display = "block";
                 carregarDadosCloud();
             } else {
-                erro.style.display = "block";
+                document.getElementById("erroSenha").style.display = "block";
                 document.getElementById("senhaInput").value = "";
-                document.getElementById("senhaInput").focus();
             }
         };
 
@@ -80,6 +79,7 @@
             document.getElementById("recBahia").value = dadosApp[m].bahia || "";
             document.getElementById("recLEM").value = dadosApp[m].lem || "";
             document.getElementById("tituloMes").innerText = m;
+            cancelarEdicao();
             atualizarTela();
         };
 
@@ -87,6 +87,7 @@
             categoriaAtual = cat;
             document.getElementById("btnFixas").classList.toggle("active", cat === 'fixas');
             document.getElementById("btnVariaveis").classList.toggle("active", cat === 'variaveis');
+            cancelarEdicao();
             atualizarTela();
         };
 
@@ -94,12 +95,58 @@
             const desc = document.getElementById("descricao").value;
             const valor = parseFloat(document.getElementById("valor").value);
             if (!desc || isNaN(valor)) return;
+
             if (!dadosApp[mesAtual][categoriaAtual]) dadosApp[mesAtual][categoriaAtual] = [];
-            dadosApp[mesAtual][categoriaAtual].push({ id: Date.now(), descricao: desc, valor, pago: false });
+
+            if (idEditando) {
+                // Modo Edição
+                const index = dadosApp[mesAtual][categoriaAtual].findIndex(g => g.id === idEditando);
+                if (index !== -1) {
+                    dadosApp[mesAtual][categoriaAtual][index].descricao = desc;
+                    dadosApp[mesAtual][categoriaAtual][index].valor = valor;
+                }
+                cancelarEdicao();
+            } else {
+                // Modo Novo
+                dadosApp[mesAtual][categoriaAtual].push({ id: Date.now(), descricao: desc, valor, pago: false });
+            }
+
             document.getElementById("descricao").value = "";
             document.getElementById("valor").value = "";
             atualizarTela();
             salvarCloud();
+        };
+
+        window.editarGasto = (id) => {
+            const gasto = dadosApp[mesAtual][categoriaAtual].find(g => g.id === id);
+            if (gasto) {
+                idEditando = id;
+                document.getElementById("descricao").value = gasto.descricao;
+                document.getElementById("valor").value = gasto.valor;
+                document.getElementById("btnSalvar").innerText = "ATUALIZAR";
+                document.getElementById("btnCancelar").style.display = "block";
+                window.scrollTo(0,0);
+            }
+        };
+
+        window.cancelarEdicao = () => {
+            idEditando = null;
+            document.getElementById("descricao").value = "";
+            document.getElementById("valor").value = "";
+            document.getElementById("btnSalvar").innerText = "SALVAR";
+            document.getElementById("btnCancelar").style.display = "none";
+        };
+
+        window.replicarGasto = (id) => {
+            const gasto = dadosApp[mesAtual].fixas.find(g => g.id === id);
+            const proximoMes = meses[(meses.indexOf(mesAtual) + 1) % 12];
+            const destino = prompt(`Replicar "${gasto.descricao}" para qual mês?`, proximoMes);
+            if (destino && meses.includes(destino)) {
+                if (!dadosApp[destino]) dadosApp[destino] = { fixas: [], variaveis: [], bahia: "", lem: "" };
+                dadosApp[destino].fixas.push({ ...gasto, id: Date.now(), pago: false });
+                salvarCloud();
+                alert(`Copiado para ${destino}!`);
+            }
         };
 
         window.togglePago = (id) => {
@@ -117,23 +164,6 @@
             }
         };
 
-        // --- FUNÇÃO DE REPLICAR RESTAURADA ---
-        window.replicarGasto = (id) => {
-            const gasto = dadosApp[mesAtual].fixas.find(g => g.id === id);
-            const proximoIndex = (meses.indexOf(mesAtual) + 1) % 12;
-            const proximoMesDefault = meses[proximoIndex];
-            
-            const destino = prompt(`Replicar "${gasto.descricao}" para qual mês?`, proximoMesDefault);
-            
-            if (destino && meses.includes(destino)) {
-                if (!dadosApp[destino]) dadosApp[destino] = { fixas: [], variaveis: [], bahia: "", lem: "" };
-                // Adiciona uma cópia com novo ID e status "não pago"
-                dadosApp[destino].fixas.push({ ...gasto, id: Date.now(), pago: false });
-                salvarCloud();
-                alert(`Copiado para ${destino}!`);
-            }
-        };
-
         function atualizarTela() {
             const tbody = document.querySelector("#tabelaGastos tbody");
             tbody.innerHTML = "";
@@ -142,8 +172,6 @@
             lista.forEach(g => {
                 const tr = document.createElement("tr");
                 if (g.pago) tr.style.opacity = "0.4";
-                
-                // Botão "Rep" aparece apenas em Fixas
                 const btnRep = categoriaAtual === 'fixas' ? `<button class="btn-rep" onclick="replicarGasto(${g.id})">Rep</button>` : '';
 
                 tr.innerHTML = `
@@ -151,6 +179,7 @@
                     <td><strong>${g.descricao}</strong></td>
                     <td style="font-weight:bold">R$ ${fmt(g.valor)}</td>
                     <td>
+                        <button class="btn-edit" onclick="editarGasto(${g.id})">Edit</button>
                         ${btnRep}
                         <button class="btn-del" onclick="excluirGasto(${g.id})">X</button>
                     </td>
@@ -160,13 +189,13 @@
 
             const tF = (dadosApp[mesAtual].fixas || []).reduce((a, b) => a + b.valor, 0);
             const tV = (dadosApp[mesAtual].variaveis || []).reduce((a, b) => a + b.valor, 0);
-            const totalRec = extrair(document.getElementById("recBahia").value) + extrair(document.getElementById("recLEM").value);
+            const rB = extrair(document.getElementById("recBahia").value);
+            const rL = extrair(document.getElementById("recLEM").value);
             
             document.getElementById("totalFixas").innerText = "R$ " + fmt(tF);
             document.getElementById("totalVariaveis").innerText = "R$ " + fmt(tV);
-            document.getElementById("totalRec").innerText = "R$ " + fmt(totalRec);
-            
-            const saldo = totalRec - (tF + tV);
+            document.getElementById("totalRec").innerText = "R$ " + fmt(rB + rL);
+            const saldo = (rB + rL) - (tF + tV);
             const sEl = document.getElementById("saldoFinal");
             sEl.innerText = "R$ " + fmt(saldo);
             sEl.style.color = saldo < 0 ? "#ef4444" : "#10b981";
@@ -207,9 +236,10 @@
         .inputs-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
         input { padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; }
         table { width: 100%; border-collapse: collapse; }
-        td { padding: 12px 2px; border-bottom: 1px solid #f1f5f9; }
-        .btn-del { background: var(--danger); color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; }
-        .btn-rep { background: #06b6d4; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; margin-right: 2px; }
+        td { padding: 12px 2px; border-bottom: 1px solid #f1f5f9; font-size: 0.9rem; }
+        .btn-del { background: var(--danger); color: white; border: none; padding: 6px; border-radius: 6px; cursor: pointer; }
+        .btn-rep { background: #06b6d4; color: white; border: none; padding: 6px; border-radius: 6px; cursor: pointer; margin-right: 2px; }
+        .btn-edit { background: #fbbf24; color: white; border: none; padding: 6px; border-radius: 6px; cursor: pointer; margin-right: 2px; }
         .resumo { background: #f8fafc; padding: 15px; border-radius: 15px; margin-top: 10px; }
         .saldo-total { border-top: 2px solid #e2e8f0; margin-top: 10px; padding-top: 10px; font-size: 1.4rem; font-weight: 800; display: flex; justify-content: space-between; }
     </style>
@@ -235,7 +265,8 @@
             <div class="inputs-row">
                 <input type="text" id="descricao" placeholder="Descrição">
                 <input type="number" id="valor" step="0.01" placeholder="Valor R$">
-                <button onclick="adicionarGasto()" style="background:var(--success); color:white; border:none; padding:15px; border-radius:10px; font-weight:bold">SALVAR</button>
+                <button id="btnSalvar" onclick="adicionarGasto()" style="background:var(--success); color:white; border:none; padding:15px; border-radius:10px; font-weight:bold">SALVAR</button>
+                <button id="btnCancelar" onclick="cancelarEdicao()" style="display:none; background:#94a3b8; color:white; border:none; padding:10px; border-radius:10px; font-weight:bold">CANCELAR</button>
             </div>
             <table id="tabelaGastos">
                 <tbody></tbody>
