@@ -9,7 +9,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        // Configurações do seu Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyBUGUcA63ggg_4Zd76ur-osf42bzNZg7Jk",
             authDomain: "controle-gastos-f4fc5.firebaseapp.com",
@@ -23,7 +22,6 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // --- Variáveis de Controle ---
         const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
         let mesAtual = meses[new Date().getMonth()];
         let categoriaAtual = "fixas";
@@ -33,9 +31,6 @@
         window.verificarSenha = () => {
             const input = document.getElementById("senhaInput").value;
             const erro = document.getElementById("erroSenha");
-            
-            // Codificação simples para esconder o número 769117 do "Inspecionar"
-            // Se alguém olhar o código, verá apenas essa string esquisita abaixo.
             if (btoa(input + "caixa_secreto") === "NzY5MTE3Y2FpeGFfc2VjcmV0bw==") {
                 document.getElementById("loginScreen").style.display = "none";
                 document.getElementById("mainContent").style.display = "block";
@@ -52,22 +47,16 @@
             try {
                 const docRef = doc(db, "usuarios", "principal");
                 const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    dadosApp = docSnap.data();
-                }
+                if (docSnap.exists()) dadosApp = docSnap.data();
                 init();
-            } catch (error) {
-                console.error("Erro ao carregar:", error);
-            }
+            } catch (error) { console.error(error); }
         }
 
         async function salvarCloud() {
             if (!dadosApp[mesAtual]) dadosApp[mesAtual] = { fixas: [], variaveis: [], bahia: "", lem: "" };
             dadosApp[mesAtual].bahia = document.getElementById("recBahia").value;
             dadosApp[mesAtual].lem = document.getElementById("recLEM").value;
-            try {
-                await setDoc(doc(db, "usuarios", "principal"), dadosApp);
-            } catch (e) { console.error("Erro ao salvar:", e); }
+            await setDoc(doc(db, "usuarios", "principal"), dadosApp);
         }
 
         // --- LÓGICA DO APP ---
@@ -104,11 +93,9 @@
         window.adicionarGasto = () => {
             const desc = document.getElementById("descricao").value;
             const valor = parseFloat(document.getElementById("valor").value);
-            if (!desc || isNaN(valor)) return alert("Preencha descrição e valor!");
-
+            if (!desc || isNaN(valor)) return;
             if (!dadosApp[mesAtual][categoriaAtual]) dadosApp[mesAtual][categoriaAtual] = [];
             dadosApp[mesAtual][categoriaAtual].push({ id: Date.now(), descricao: desc, valor, pago: false });
-
             document.getElementById("descricao").value = "";
             document.getElementById("valor").value = "";
             atualizarTela();
@@ -123,10 +110,27 @@
         };
 
         window.excluirGasto = (id) => {
-            if (confirm("Deseja excluir?")) {
+            if (confirm("Excluir?")) {
                 dadosApp[mesAtual][categoriaAtual] = dadosApp[mesAtual][categoriaAtual].filter(g => g.id !== id);
                 atualizarTela();
                 salvarCloud();
+            }
+        };
+
+        // --- FUNÇÃO DE REPLICAR RESTAURADA ---
+        window.replicarGasto = (id) => {
+            const gasto = dadosApp[mesAtual].fixas.find(g => g.id === id);
+            const proximoIndex = (meses.indexOf(mesAtual) + 1) % 12;
+            const proximoMesDefault = meses[proximoIndex];
+            
+            const destino = prompt(`Replicar "${gasto.descricao}" para qual mês?`, proximoMesDefault);
+            
+            if (destino && meses.includes(destino)) {
+                if (!dadosApp[destino]) dadosApp[destino] = { fixas: [], variaveis: [], bahia: "", lem: "" };
+                // Adiciona uma cópia com novo ID e status "não pago"
+                dadosApp[destino].fixas.push({ ...gasto, id: Date.now(), pago: false });
+                salvarCloud();
+                alert(`Copiado para ${destino}!`);
             }
         };
 
@@ -138,25 +142,31 @@
             lista.forEach(g => {
                 const tr = document.createElement("tr");
                 if (g.pago) tr.style.opacity = "0.4";
+                
+                // Botão "Rep" aparece apenas em Fixas
+                const btnRep = categoriaAtual === 'fixas' ? `<button class="btn-rep" onclick="replicarGasto(${g.id})">Rep</button>` : '';
+
                 tr.innerHTML = `
                     <td><input type="checkbox" style="transform:scale(1.4)" ${g.pago ? 'checked' : ''} onchange="togglePago(${g.id})"></td>
                     <td><strong>${g.descricao}</strong></td>
                     <td style="font-weight:bold">R$ ${fmt(g.valor)}</td>
-                    <td><button class="btn-del" onclick="excluirGasto(${g.id})">X</button></td>
+                    <td>
+                        ${btnRep}
+                        <button class="btn-del" onclick="excluirGasto(${g.id})">X</button>
+                    </td>
                 `;
                 tbody.appendChild(tr);
             });
 
             const tF = (dadosApp[mesAtual].fixas || []).reduce((a, b) => a + b.valor, 0);
             const tV = (dadosApp[mesAtual].variaveis || []).reduce((a, b) => a + b.valor, 0);
-            const rB = extrair(document.getElementById("recBahia").value);
-            const rL = extrair(document.getElementById("recLEM").value);
+            const totalRec = extrair(document.getElementById("recBahia").value) + extrair(document.getElementById("recLEM").value);
             
             document.getElementById("totalFixas").innerText = "R$ " + fmt(tF);
             document.getElementById("totalVariaveis").innerText = "R$ " + fmt(tV);
-            document.getElementById("totalRec").innerText = "R$ " + fmt(rB + rL);
+            document.getElementById("totalRec").innerText = "R$ " + fmt(totalRec);
             
-            const saldo = (rB + rL) - (tF + tV);
+            const saldo = totalRec - (tF + tV);
             const sEl = document.getElementById("saldoFinal");
             sEl.innerText = "R$ " + fmt(saldo);
             sEl.style.color = saldo < 0 ? "#ef4444" : "#10b981";
@@ -178,43 +188,36 @@
 
     <style>
         :root { --primary: #4f46e5; --secondary: #f59e0b; --fixas: #0ea5e9; --variaveis: #8b5cf6; --success: #10b981; --danger: #ef4444; --bg: #f1f5f9; }
-        * { box-sizing: border-box; font-family: -apple-system, sans-serif; }
-        body { background: var(--bg); margin: 0; padding: 10px; color: #1e293b; }
-
-        #loginScreen { position: fixed; inset: 0; background: var(--primary); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
+        * { box-sizing: border-box; font-family: sans-serif; }
+        body { background: var(--bg); margin: 0; padding: 10px; }
+        #loginScreen { position: fixed; inset: 0; background: var(--primary); display: flex; justify-content: center; align-items: center; z-index: 1000; }
         .login-box { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 100%; max-width: 320px; }
-        .login-box input { font-size: 1.5rem; width: 100%; text-align: center; border: 2px solid #e2e8f0; border-radius: 12px; margin-bottom: 15px; padding: 10px; outline: none; }
+        .login-box input { font-size: 1.5rem; width: 100%; text-align: center; border: 2px solid #e2e8f0; border-radius: 12px; margin-bottom: 15px; padding: 10px; }
         .login-box button { background: var(--primary); color: white; padding: 15px; border-radius: 12px; width: 100%; font-size: 1.1rem; border: none; font-weight: bold; cursor: pointer; }
         #erroSenha { color: var(--danger); margin-top: 10px; font-weight: bold; display: none; }
-
         #mainContent { display: none; max-width: 500px; margin: 0 auto; }
-        .month-nav { display: flex; overflow-x: auto; gap: 8px; padding: 10px 0; scrollbar-width: none; }
+        .month-nav { display: flex; overflow-x: auto; gap: 8px; padding-bottom: 10px; scrollbar-width: none; }
         .month-btn { flex: 0 0 auto; padding: 10px 15px; border: none; border-radius: 10px; background: white; font-weight: bold; color: #64748b; }
         .month-btn.active { background: var(--secondary); color: white; }
-
         .category-nav { display: flex; gap: 10px; margin-bottom: 15px; }
         .cat-btn { flex: 1; padding: 15px; border: none; border-radius: 12px; background: white; font-weight: 800; color: #64748b; }
         #btnFixas.active { background: var(--fixas); color: white; }
         #btnVariaveis.active { background: var(--variaveis); color: white; }
-
         .card { background: white; padding: 15px; border-radius: 20px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .inputs-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
-        input { padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 1rem; }
-        .btn-add { background: var(--success); color: white; border: none; padding: 12px; border-radius: 10px; font-weight: bold; }
-
+        input { padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; }
         table { width: 100%; border-collapse: collapse; }
-        td { padding: 12px 5px; border-bottom: 1px solid #f1f5f9; }
-        .btn-del { background: var(--danger); color: white; border: none; padding: 5px 10px; border-radius: 8px; cursor: pointer; }
-
+        td { padding: 12px 2px; border-bottom: 1px solid #f1f5f9; }
+        .btn-del { background: var(--danger); color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; }
+        .btn-rep { background: #06b6d4; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; margin-right: 2px; }
         .resumo { background: #f8fafc; padding: 15px; border-radius: 15px; margin-top: 10px; }
         .saldo-total { border-top: 2px solid #e2e8f0; margin-top: 10px; padding-top: 10px; font-size: 1.4rem; font-weight: 800; display: flex; justify-content: space-between; }
     </style>
 </head>
 <body>
-
     <div id="loginScreen">
         <div class="login-box">
-            <h2 style="margin-top:0">🔐 Acesso</h2>
+            <h2>🔐 Acesso</h2>
             <input type="password" id="senhaInput" placeholder="Sua senha">
             <button onclick="verificarSenha()">ENTRAR</button>
             <div id="erroSenha">⚠️ Senha Incorreta!</div>
@@ -223,18 +226,16 @@
 
     <div id="mainContent">
         <div class="month-nav" id="monthNav"></div>
-
         <div class="category-nav">
             <button class="cat-btn active" id="btnFixas" onclick="mudarCategoria('fixas')">FIXAS</button>
             <button class="cat-btn" id="btnVariaveis" onclick="mudarCategoria('variaveis')">VARIÁVEIS</button>
         </div>
-
         <div class="card">
             <h2 id="tituloMes" style="margin:0 0 15px 0; color: var(--primary);"></h2>
             <div class="inputs-row">
                 <input type="text" id="descricao" placeholder="Descrição">
                 <input type="number" id="valor" step="0.01" placeholder="Valor R$">
-                <button class="btn-add" onclick="adicionarGasto()">ADICIONAR GASTO</button>
+                <button onclick="adicionarGasto()" style="background:var(--success); color:white; border:none; padding:15px; border-radius:10px; font-weight:bold">SALVAR</button>
             </div>
             <table id="tabelaGastos">
                 <tbody></tbody>
@@ -245,22 +246,14 @@
                 <div class="saldo-total">SALDO: <span id="saldoFinal"></span></div>
             </div>
         </div>
-
         <div class="card" style="border-top: 6px solid var(--success);">
-            <h3 style="margin:0">💰 Recebimentos</h3>
-            <div style="margin-top:10px">
-                <small style="font-weight:bold; color: #94a3b8">ESTADO DA BAHIA</small>
-                <input type="text" id="recBahia" class="moeda-input" style="width:100%">
-            </div>
-            <div style="margin-top:10px">
-                <small style="font-weight:bold; color: #94a3b8">L.E.M.</small>
-                <input type="text" id="recLEM" class="moeda-input" style="width:100%">
-            </div>
-            <div style="text-align:center; margin-top:15px; border-top:1px solid #eee; padding-top:10px">
-                <span id="totalRec" style="font-size: 1.8rem; font-weight: 800; color: var(--success);"></span>
-            </div>
+            <h3>💰 Recebimentos</h3>
+            <small>BAHIA</small><input type="text" id="recBahia" class="moeda-input" style="width:100%">
+            <small>LEM</small><input type="text" id="recLEM" class="moeda-input" style="width:100%">
+            <p style="text-align:center; font-weight:bold; margin-top:15px; border-top:1px solid #eee; padding-top:10px">
+                Total: <span id="totalRec" style="font-size: 1.8rem; color: var(--success);"></span>
+            </p>
         </div>
     </div>
-
 </body>
 </html>
