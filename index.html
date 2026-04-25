@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle Financeiro Cloud</title>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // Suas credenciais validadas
+        const firebaseConfig = {
+            apiKey: "AIzaSyBUGUcA63ggg_4Zd76ur-osf42bzNZg7Jk",
+            authDomain: "controle-gastos-f4fc5.firebaseapp.com",
+            projectId: "controle-gastos-f4fc5",
+            storageBucket: "controle-gastos-f4fc5.firebasestorage.app",
+            messagingSenderId: "1052890949635",
+            appId: "1:1052890949635:web:a0b8056bcef7794d39c636",
+            measurementId: "G-6G9K3Z59JW"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // --- Variáveis Globais ---
+        const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+        let mesAtual = meses[new Date().getMonth()];
+        let categoriaAtual = "fixas";
+        let dadosApp = {};
+
+        // --- Funções de Sincronização Cloud ---
+        async function carregarDadosCloud() {
+            try {
+                const docRef = doc(db, "usuarios", "principal");
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    dadosApp = docSnap.data();
+                } else {
+                    dadosApp = {};
+                }
+                init();
+            } catch (e) {
+                console.error("Erro ao carregar dados:", e);
+            }
+        }
+
+        async function salvarCloud() {
+            try {
+                if (!dadosApp[mesAtual]) dadosApp[mesAtual] = { fixas: [], variaveis: [], bahia: "", lem: "" };
+                
+                // Atualiza recebimentos do mês antes de salvar
+                dadosApp[mesAtual].bahia = document.getElementById("recBahia").value;
+                dadosApp[mesAtual].lem = document.getElementById("recLEM").value;
+
+                await setDoc(doc(db, "usuarios", "principal"), dadosApp);
+                console.log("Sincronizado com Firebase!");
+            } catch (e) {
+                console.error("Erro ao salvar:", e);
+            }
+        }
+
+        // --- Lógica de Interface ---
+        window.verificarSenha = () => {
+            const input = document.getElementById("senhaInput");
+            const erro = document.getElementById("erroSenha");
+            if (input.value === "24") {
+                document.getElementById("loginScreen").style.display = "none";
+                document.getElementById("mainContent").style.display = "block";
+                carregarDadosCloud();
+            } else {
+                erro.style.display = "block";
+                input.value = "";
+                input.focus();
+            }
+        };
+
+        function init() {
+            const nav = document.getElementById("monthNav");
+            nav.innerHTML = "";
+            meses.forEach(m => {
+                const btn = document.createElement("button");
+                btn.className = "month-btn" + (m === mesAtual ? " active" : "");
+                btn.innerText = m;
+                btn.onclick = () => mudarMes(m);
+                nav.appendChild(btn);
+            });
+            mudarMes(mesAtual);
+        }
+
+        window.mudarMes = (m) => {
+            mesAtual = m;
+            document.querySelectorAll(".month-btn").forEach(b => b.classList.toggle("active", b.innerText === m));
+            if (!dadosApp[m]) dadosApp[m] = { fixas: [], variaveis: [], bahia: "", lem: "" };
+            
+            document.getElementById("recBahia").value = dadosApp[m].bahia || "";
+            document.getElementById("recLEM").value = dadosApp[m].lem || "";
+            document.getElementById("tituloMes").innerText = m;
+            atualizarTela();
+        };
+
+        window.mudarCategoria = (cat) => {
+            categoriaAtual = cat;
+            document.getElementById("btnFixas").classList.toggle("active", cat === 'fixas');
+            document.getElementById("btnVariaveis").classList.toggle("active", cat === 'variaveis');
+            atualizarTela();
+        };
+
+        window.adicionarGasto = () => {
+            const desc = document.getElementById("descricao").value;
+            const valor = parseFloat(document.getElementById("valor").value);
+            if (!desc || isNaN(valor)) return alert("Preencha descrição e valor!");
+
+            if (!dadosApp[mesAtual][categoriaAtual]) dadosApp[mesAtual][categoriaAtual] = [];
+            
+            dadosApp[mesAtual][categoriaAtual].push({
+                id: Date.now(),
+                descricao: desc,
+                valor: valor,
+                pago: false
+            });
+
+            document.getElementById("descricao").value = "";
+            document.getElementById("valor").value = "";
+            atualizarTela();
+            salvarCloud();
+        };
+
+        window.togglePago = (id) => {
+            const item = dadosApp[mesAtual][categoriaAtual].find(g => g.id === id);
+            if (item) item.pago = !item.pago;
+            atualizarTela();
+            salvarCloud();
+        };
+
+        window.excluirGasto = (id) => {
+            if (confirm("Excluir item?")) {
+                dadosApp[mesAtual][categoriaAtual] = dadosApp[mesAtual][categoriaAtual].filter(g => g.id !== id);
+                atualizarTela();
+                salvarCloud();
+            }
+        };
+
+        window.replicarGasto = (id) => {
+            const gasto = dadosApp[mesAtual].fixas.find(g => g.id === id);
+            const proximo = meses[(meses.indexOf(mesAtual) + 1) % 12];
+            const destino = prompt(`Replicar "${gasto.descricao}" para qual mês?`, proximo);
+            
+            if (destino && meses.includes(destino)) {
+                if (!dadosApp[destino]) dadosApp[destino] = { fixas: [], variaveis: [], bahia: "", lem: "" };
+                dadosApp[destino].fixas.push({ ...gasto, id: Date.now(), pago: false });
+                salvarCloud();
+                alert(`Copiado para ${destino}!`);
+            }
+        };
+
+        function atualizarTela() {
+            const tbody = document.querySelector("#tabelaGastos tbody");
+            tbody.innerHTML = "";
+            const lista = dadosApp[mesAtual][categoriaAtual] || [];
+
+            lista.forEach(g => {
+                const tr = document.createElement("tr");
+                if (g.pago) tr.classList.add("linha-paga");
+                const btnRep = categoriaAtual === 'fixas' ? `<button class="btn-op btn-rep" onclick="replicarGasto(${g.id})">Rep</button>` : '';
+
+                tr.innerHTML = `
+                    <td><input type="checkbox" style="transform:scale(1.3)" ${g.pago ? 'checked' : ''} onchange="togglePago(${g.id})"></td>
+                    <td><strong>${g.descricao}</strong></td>
+                    <td style="font-weight:bold">R$ ${fmt(g.valor)}</td>
+                    <td>
+                        ${btnRep}
+                        <button class="btn-op btn-del" onclick="excluirGasto(${g.id})">X</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Resumo Financeiro
+            const tF = (dadosApp[mesAtual].fixas || []).reduce((a, b) => a + b.valor, 0);
+            const tV = (dadosApp[mesAtual].variaveis || []).reduce((a, b) => a + b.valor, 0);
+            const rBahia = extrair(document.getElementById("recBahia").value);
+            const rLEM = extrair(document.getElementById("recLEM").value);
+            const totalRec = rBahia + rLEM;
+            
+            document.getElementById("totalFixas").innerText = "R$ " + fmt(tF);
+            document.getElementById("totalVariaveis").innerText = "R$ " + fmt(tV);
+            document.getElementById("totalRec").innerText = "R$ " + fmt(totalRec);
+            
+            const saldo = totalRec - (tF + tV);
+            const sEl = document.getElementById("saldoFinal");
+            sEl.innerText = "R$ " + fmt(saldo);
+            sEl.style.color = saldo < 0 ? "#ef4444" : "#10b981";
+        }
+
+        function fmt(v) { return Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2 }); }
+        function extrair(v) { return parseFloat(v.replace(/[^\d,]/g, "").replace(",", ".")) || 0; }
+
+        // Mascaras de Moeda
+        document.querySelectorAll(".moeda-input").forEach(i => {
+            i.addEventListener("blur", salvarCloud);
+            i.addEventListener("input", (e) => {
+                let v = e.target.value.replace(/\D/g, "");
+                v = (v / 100).toFixed(2).replace(".", ",");
+                v = v.replace(/(\d)(\d{3})(\d{3}),/g, "$1.$2.$3,");
+                v = v.replace(/(\d)(\d{3}),/g, "$1.$2,");
+                e.target.value = "R$ " + v;
+                atualizarTela();
+            });
+        });
+    </script>
+
+    <style>
+        :root {
+            --primary: #4f46e5; --secondary: #f59e0b; --fixas: #0ea5e9; --variaveis: #8b5cf6;
+            --success: #10b981; --danger: #ef4444; --background: #f1f5f9; --border: #e2e8f0;
+        }
+        * { box-sizing: border-box; font-family: -apple-system, system-ui, sans-serif; }
+        body { background: var(--background); margin: 0; padding: 10px; color: #1e293b; }
+
+        /* Login */
+        #loginScreen { position: fixed; inset: 0; background: var(--primary); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
+        .login-box { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 100%; max-width: 320px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+        .login-box input { font-size: 2.5rem; width: 100%; text-align: center; border: 2px solid var(--border); border-radius: 12px; margin-bottom: 15px; outline: none; background: #f8fafc; }
+        .login-box button { background: var(--primary); color: white; padding: 15px; border-radius: 12px; width: 100%; font-size: 1.2rem; border: none; font-weight: bold; cursor: pointer; }
+        #erroSenha { color: var(--danger); margin-top: 10px; font-weight: bold; display: none; }
+
+        /* Layout */
+        #mainContent { display: none; max-width: 600px; margin: 0 auto; }
+        .month-nav { display: flex; overflow-x: auto; gap: 8px; padding: 10px 0; scrollbar-width: none; }
+        .month-btn { flex: 0 0 auto; padding: 10px 15px; border: none; border-radius: 10px; background: white; font-weight: bold; color: #64748b; }
+        .month-btn.active { background: var(--secondary); color: white; }
+
+        .category-nav { display: flex; gap: 10px; margin-bottom: 15px; }
+        .cat-btn { flex: 1; padding: 15px; border: none; border-radius: 12px; background: white; font-weight: 800; color: #64748b; }
+        #btnFixas.active { background: var(--fixas); color: white; }
+        #btnVariaveis.active { background: var(--variaveis); color: white; }
+
+        .card { background: white; padding: 15px; border-radius: 20px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .inputs-row { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; background: #f8fafc; padding: 10px; border-radius: 12px; }
+        input { padding: 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 1rem; }
+        .add-btn { background: var(--success); color: white; border: none; padding: 12px; border-radius: 10px; font-weight: bold; }
+
+        table { width: 100%; border-collapse: collapse; }
+        td, th { padding: 12px 8px; border-bottom: 1px solid #f1f5f9; text-align: left; }
+        .linha-paga { opacity: 0.4; text-decoration: line-through; }
+        .btn-op { border: none; padding: 8px 12px; border-radius: 8px; color: white; font-weight: bold; margin-left: 3px; }
+        .btn-del { background: var(--danger); }
+        .btn-rep { background: #06b6d4; }
+
+        .resumo { background: #f8fafc; padding: 15px; border-radius: 15px; margin-top: 10px; }
+        .saldo-total { border-top: 2px solid #e2e8f0; margin-top: 10px; padding-top: 10px; font-size: 1.4rem; font-weight: 800; display: flex; justify-content: space-between; }
+        
+        .rec-label { font-size: 0.7rem; font-weight: bold; color: #94a3b8; display: block; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="loginScreen">
+        <div class="login-box">
+            <h1>🔐 Acesso</h1>
+            <input type="password" id="senhaInput" inputmode="numeric" maxlength="2" placeholder="**">
+            <button onclick="verificarSenha()">ENTRAR</button>
+            <div id="erroSenha">⚠️ Senha Incorreta!</div>
+        </div>
+    </div>
+
+    <div id="mainContent">
+        <div class="month-nav" id="monthNav"></div>
+
+        <div class="category-nav">
+            <button class="cat-btn active" id="btnFixas" onclick="mudarCategoria('fixas')">FIXAS</button>
+            <button class="cat-btn" id="btnVariaveis" onclick="mudarCategoria('variaveis')">VARIÁVEIS</button>
+        </div>
+
+        <div class="card">
+            <h2 id="tituloMes" style="margin:0 0 15px 0; color: var(--primary);"></h2>
+            <div class="inputs-row">
+                <input type="text" id="descricao" placeholder="Descrição">
+                <input type="number" id="valor" step="0.01" placeholder="Valor R$">
+                <button class="add-btn" onclick="adicionarGasto()">ADICIONAR</button>
+            </div>
+
+            <table id="tabelaGastos">
+                <thead>
+                    <tr><th>OK</th><th>ITEM</th><th>VALOR</th><th>AÇÕES</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <div class="resumo">
+                <p style="display:flex; justify-content:space-between; margin:5px 0">Fixas: <span id="totalFixas" style="color:var(--fixas); font-weight:bold"></span></p>
+                <p style="display:flex; justify-content:space-between; margin:5px 0">Variáveis: <span id="totalVariaveis" style="color:var(--variaveis); font-weight:bold"></span></p>
+                <div class="saldo-total">SALDO: <span id="saldoFinal"></span></div>
+            </div>
+        </div>
+
+        <div class="card" style="border-top: 6px solid var(--success);">
+            <h3 style="margin:0">💰 Recebimentos</h3>
+            <span class="rec-label">ESTADO DA BAHIA</span>
+            <input type="text" id="recBahia" class="moeda-input" style="width:100%">
+            
+            <span class="rec-label">L.E.M.</span>
+            <input type="text" id="recLEM" class="moeda-input" style="width:100%">
+            
+            <div style="margin-top:15px; text-align:center; border-top:1px solid #eee; padding-top:10px">
+                <small style="color:#94a3b8; font-weight:bold">TOTAL RECEBIDO</small><br>
+                <span id="totalRec" style="font-size: 1.8rem; font-weight: 800; color: var(--success);"></span>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
